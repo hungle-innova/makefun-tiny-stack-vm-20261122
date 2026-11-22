@@ -63,6 +63,28 @@ const OPS: Record<number, [number, number, number]> = {
 
 const enc = new TextEncoder();
 
+function evalAlu(op: number, a: number, b: number): number | 'DIV_ZERO' {
+  switch (op) {
+    case 0x10: return (a + b) | 0;
+    case 0x11: return (a - b) | 0;
+    case 0x12: return Math.imul(a, b);
+    case 0x13: return b === 0 ? 'DIV_ZERO' : a === -2147483648 && b === -1 ? a : (a / b) | 0;
+    case 0x14: return b === 0 ? 'DIV_ZERO' : b === -1 ? 0 : (a % b) | 0;
+    case 0x15: return b === 0 ? 'DIV_ZERO' : Math.floor((a >>> 0) / (b >>> 0)) | 0;
+    case 0x16: return b === 0 ? 'DIV_ZERO' : ((a >>> 0) % (b >>> 0)) | 0;
+    case 0x18: return a & b;
+    case 0x19: return a | b;
+    case 0x1a: return a ^ b;
+    case 0x1c: return a << (b & 31);
+    case 0x1d: return a >> (b & 31);
+    case 0x1e: return (a >>> (b & 31)) | 0;
+    case 0x20: return a === b ? 1 : 0;
+    case 0x21: return a < b ? 1 : 0;
+    case 0x22: return (a >>> 0) < (b >>> 0) ? 1 : 0;
+    default: return 0;
+  }
+}
+
 function run(prog: Uint8Array, inp: Uint8Array): { stdout: Uint8Array; exit: number } {
   const n = prog.length;
   const D = new Int32Array(STACK_MAX);
@@ -109,25 +131,25 @@ function run(prog: Uint8Array, inp: Uint8Array): { stdout: Uint8Array; exit: num
       case 0x03:
         sp--;
         break;
-      case 0x04:
+      case 0x04: // DUP
         D[sp] = D[sp - 1];
         sp++;
         break;
-      case 0x05: {
+      case 0x05: { // SWAP
         const t = D[sp - 1];
         D[sp - 1] = D[sp - 2];
         D[sp - 2] = t;
         break;
       }
-      case 0x06:
+      case 0x06: // OVER
         D[sp] = D[sp - 2];
         sp++;
         break;
-      case 0x07: {
-        const a = D[sp - 3];
+      case 0x07: { // ROT
+        const t = D[sp - 3];
         D[sp - 3] = D[sp - 2];
         D[sp - 2] = D[sp - 1];
-        D[sp - 1] = a;
+        D[sp - 1] = t;
         break;
       }
       case 0x17:
@@ -140,37 +162,10 @@ function run(prog: Uint8Array, inp: Uint8Array): { stdout: Uint8Array; exit: num
       case 0x18: case 0x19: case 0x1a: case 0x1c: case 0x1d: case 0x1e:
       case 0x20: case 0x21: case 0x22: {
         const b = D[sp - 1], a = D[sp - 2];
-        let r = 0;
-        if (op === 0x10) r = (a + b) | 0;
-        else if (op === 0x11) r = (a - b) | 0;
-        else if (op === 0x12) r = Math.imul(a, b);
-        else if (op === 0x13) {
-          if (b === 0) return trap(TRAP.DIV_ZERO);
-          r = a === -2147483648 && b === -1 ? a : (a / b) | 0;
-        }
-        else if (op === 0x14) {
-          if (b === 0) return trap(TRAP.DIV_ZERO);
-          r = b === -1 ? 0 : (a % b) | 0;
-        }
-        else if (op === 0x15) {
-          if (b === 0) return trap(TRAP.DIV_ZERO);
-          r = Math.floor((a >>> 0) / (b >>> 0)) | 0;
-        }
-        else if (op === 0x16) {
-          if (b === 0) return trap(TRAP.DIV_ZERO);
-          r = ((a >>> 0) % (b >>> 0)) | 0;
-        }
-        else if (op === 0x18) r = a & b;
-        else if (op === 0x19) r = a | b;
-        else if (op === 0x1a) r = a ^ b;
-        else if (op === 0x1c) r = a << (b & 31);
-        else if (op === 0x1d) r = a >> (b & 31);
-        else if (op === 0x1e) r = (a >>> (b & 31)) | 0;
-        else if (op === 0x20) r = a === b ? 1 : 0;
-        else if (op === 0x21) r = a < b ? 1 : 0;
-        else if (op === 0x22) r = (a >>> 0) < (b >>> 0) ? 1 : 0;
+        const res = evalAlu(op, a, b);
+        if (res === 'DIV_ZERO') return trap(TRAP.DIV_ZERO);
         sp -= 2;
-        D[sp++] = r;
+        D[sp++] = res;
         break;
       }
       case 0x30: case 0x31: case 0x32: {
